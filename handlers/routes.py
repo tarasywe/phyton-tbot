@@ -3,142 +3,69 @@ from aiogram.filters import Command
 
 from aiogram.types import (
     Message,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
+    FSInputFile
 )
 
-from forms.user import Form
-from aiogram.fsm.context import FSMContext
-from aiogram.types import FSInputFile
+import aiohttp
 
 router = Router()
 
+async def get_product(product_id):
+    url = f"https://fakestoreapi.com/products/{product_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            if resp.status == 404:
+                return None
 
-def get_main_inline_keyboard():
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Open site", url="https://www.lvivyoga.club/")],
-            [InlineKeyboardButton(text="Help", callback_data="info")],
-        ]
-    )
+            data = await resp.json()
+            return data
 
-    return keyboard
-
-def get_main_reply_keyboard():
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="About")],
-            [KeyboardButton(text="Help"), KeyboardButton(text="Start")],
-        ],
-        resize_keyboard=True,
-    )
-
-    return keyboard
-
-@router.callback_query(lambda query: query.data == "info")
-async def info(callback):
-    await callback.message.answer('Here is more detailed info!')
-    await callback.answer()
-
-@router.message(Command("cancel"))
-async def cancel_form(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Cancelled questionary")
 
 @router.message(Command("start"))
-@router.message(F.text.lover() == "cтарт")
-async def start(message: Message, state: FSMContext):
-    await message.answer("Lets fill your data first:")
-    await state.set_state(Form.name)
+async def start(message: Message):
+    await message.answer("set command /product with ID: <b>/product ID</b>", parse_mode="HTML")
 
-@router.message(Form.name, F.text)
-async def process_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text)
-
-    await message.answer("Great! What is your age?")
-    await state.set_state(Form.age)
-
-@router.message(Form.age, F.text)
-async def process_age(message: Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Please enter a number")
+@router.message(Command("product"))
+async def get_product_cmd(message: Message):
+    parts = message.text.strip().split()
+    if len(parts) != 2:
+        await message.answer("From format of request, use /product 1")
         return
 
-    if int(message.text) < 6 or int(message.text) > 100:
-        await message.answer("Please enter a valid age number")
+    product_id = parts[1]
+    if not product_id.isdigit():
+        await message.answer("From format of request, use /product and number")
         return
 
-    await state.update_data(age=int(message.text))
+    await message.answer(f"All fine, looking for {product_id}")
 
-    await message.answer("Great! What is your email?")
-    await state.set_state(Form.email)
-
-@router.message(Form.email, F.text)
-async def process_email(message: Message, state: FSMContext):
-    email = message.text
-    if "@" not in email or "." not in email:
-        await message.answer("Please enter a valid email address")
+    try:
+        product = await get_product(int(product_id))
+    except Exception:
+        await message.answer("Servers return error")
         return
 
-    await state.update_data(email=message.text)
-    data = await state.get_data()
-    name = data["name"]
-    age = data["age"]
-    email = data["email"]
+    if product is None:
+        await message.answer("Product not found")
+        return
 
-    await message.answer(f"Great! Here is your data! Name: {name}, Age: {age}, Email: {email}")
-    await state.clear()
+    title = product.get("title", 'Untitled')
+    price = product.get("price", '0.0')
+    description = product.get("description", 'No description')
+    category = product.get("category", 'No category')
+    # image = product.get("image")
 
-@router.message(F.photo)
-async def process_photo(message: Message):
-    photo = message.photo[-1]
-    file_id = photo.file_id
+    text = (
+        f"<b>{title}</b>\n\n"
+        f"Category: {category}\n\n"
+        f"Price: {price}\n\n"
+        f"Description: {description}\n\n"
+    )
 
-    await message.answer(f"Here is your photo! <code>{file_id}</code>", parse_mode="html")
-
-    await message.answer_photo(file_id, caption="Here is your photo!")
-
-@router.message(F.video)
-async def process_video(message: Message):
-    video = message.video
-    file_id = video.file_id
-    duration = video.duration
-
-    await message.answer(f"Here is your video! Duration of video: <code>{duration}</code>", parse_mode="html")
-
-    await message.answer_video(file_id, caption="Here is your video!")
-
-@router.message(F.document)
-async def process_document(message: Message, bot: Bot):
-    document = message.document
-    file_id = document.file_id
-
-    file = await bot.get_file(file_id)
-    file_path = file.file_path
-
-    local_path = f'downloads/{document.file_name}'
-
-    await bot.download_file(file_path=file_path, destination=local_path)
-
-    await message.answer(f"File {document.file_name} has been downloaded")
-
-@router.message(Command("file"))
-async def send_file(message: Message):
-    file = FSInputFile('files/example.txt')
-
-    await message.answer_document(file)
+    photo = FSInputFile("image.jpeg")
 
 
-@router.message(Command("help"))
-async def start(message: Message):
-    await message.answer("Available commands: \n /start - Start bot \n /help - Show this message \n /about - About me")
-
-@router.message(Command("about"))
-async def start(message: Message):
-    await message.answer(f"Hi, {message.from_user.first_name}!\n ", reply_markup=get_main_inline_keyboard())
-
-@router.message()
-async def start(message: Message):
-    await message.answer("Use commands from the list", reply_markup=get_main_reply_keyboard())
+    # if image:
+    await message.answer_photo(photo=photo, caption=text, apparse_mode="HTML")
+    # else:
+        # await message.answer(text, parse_mode="HTML")
