@@ -3,69 +3,66 @@ from aiogram.filters import Command
 
 from aiogram.types import (
     Message,
-    FSInputFile
+    FSInputFile, User
 )
 
-import aiohttp
+import aiosqlite
+
+DB_NAME = "database.db"
 
 router = Router()
 
-async def get_product(product_id):
-    url = f"https://fakestoreapi.com/products/{product_id}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            if resp.status == 404:
-                return None
+async def init_db():
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+                     id INTEGER PRIMARY KEY,
+                     full_name TEXT,
+                     age INTEGER
+                     )
+        """)
+        await db.commit()
 
-            data = await resp.json()
-            return data
+async def add_user(full_name: str, age: int):
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("INSERT INTO users (full_name, age) VALUES (?, ?)", (full_name, age))
+        await db.commit()
 
+async def get_users() -> User:
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute("SELECT full_name, age FROM users")
+        result = await cursor.fetchall()
+        return result
 
 @router.message(Command("start"))
 async def start(message: Message):
-    await message.answer("set command /product with ID: <b>/product ID</b>", parse_mode="HTML")
+    await init_db()
+    await message.answer("Write command /reg AGE", parse_mode="HTML")
 
-@router.message(Command("product"))
-async def get_product_cmd(message: Message):
+@router.message(Command("reg"))
+async def start(message: Message):
     parts = message.text.strip().split()
-    if len(parts) != 2:
-        await message.answer("From format of request, use /product 1")
+
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("incorrect format of age")
         return
 
-    product_id = parts[1]
-    if not product_id.isdigit():
-        await message.answer("From format of request, use /product and number")
+    await add_user(message.from_user.full_name, int(parts[1]))
+
+    await message.answer("You have been registered!", parse_mode="HTML")
+
+
+@router.message(Command("users"))
+async def users(message: Message):
+    users_list = await get_users()
+
+    if not users_list:
+        await message.answer("No users registered")
         return
 
-    await message.answer(f"All fine, looking for {product_id}")
+    text = "all users:"
+    for full_name, age in users_list:
+        text += f"\nName: {full_name}: age: {age}"
 
-    try:
-        product = await get_product(int(product_id))
-    except Exception:
-        await message.answer("Servers return error")
-        return
+    await message.answer(text, parse_mode="HTML")
 
-    if product is None:
-        await message.answer("Product not found")
-        return
-
-    title = product.get("title", 'Untitled')
-    price = product.get("price", '0.0')
-    description = product.get("description", 'No description')
-    category = product.get("category", 'No category')
-    # image = product.get("image")
-
-    text = (
-        f"<b>{title}</b>\n\n"
-        f"Category: {category}\n\n"
-        f"Price: {price}\n\n"
-        f"Description: {description}\n\n"
-    )
-
-    photo = FSInputFile("image.jpeg")
-
-
-    # if image:
-    await message.answer_photo(photo=photo, caption=text, apparse_mode="HTML")
-    # else:
-        # await message.answer(text, parse_mode="HTML")
